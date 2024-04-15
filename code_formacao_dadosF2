@@ -1,0 +1,84 @@
+library(tidyverse)
+library(rvest)
+
+#PREPARACAO BANCO DE DADOS
+processando <- function(tabela, tipo, round){
+if(tipo != "Qualifying"){
+tabela <- separate(tabela, col = 1, into= c("POS", "NOME") , sep = "[0-9]+") %>% separate(col = "NOME", into = c("DRIVER", "TEAM"), sep = "[A-Z]{3}(?=[A-Z])") %>% 
+mutate(POS = row_number(), TYPE = tipo, ROUND = round, BESTLAP = ifelse(BEST == min(BEST) & BEST != "-", 1, 0), BESTLAP_P = ifelse(BESTLAP == 1 & POS < 11, 1, 0))
+if(tipo == "Feature Race"){
+tabela$POINTS <- c(25, 18, 15, 12, 10, 8, 6, 4, 2, 1, 0)[tabela$POS]
+}else if(tipo == "Sprint Race"){
+tabela$POINTS <- c(10, 8, 6, 5, 4, 3, 2, 1, 0, 0)[tabela$POS]
+}
+tabela$POINTS[tabela$POS > 10] <- 0
+tabela <- tabela %>% select(!c(TEAM, LAP, INT., LAPS, TIME, BEST))
+}
+else{
+tabela <- separate(tabela, col = 1, into= c("POS", "NOME") , sep = "[0-9]+") %>% separate(col = "NOME", into = c("DRIVER", "TEAM"), sep = "[A-Z]{3}(?=[A-Z])") %>% mutate(POS_START = row_number()) %>% select(c("DRIVER", "POS_START"))
+}
+return(tabela)
+}
+
+manipulando_f2 <-function(lista){
+data <- data.frame()
+for(i in (1:length(lista))){
+page <- read_html(lista[i])
+table <- html_table(page)
+round <- page %>% html_nodes(".schedule") %>% html_text() %>% str_extract("^[A-z]{5}[[:blank:]][0-9]{1,2}")
+table_f <- processando(table[[1]], tipo = "Feature Race", round = round)
+table_s <- processando(table[[2]], tipo = "Sprint Race", round = round)
+if(round == "Round 5"){
+table_q <- data.frame(c("F. Drugovich", "T. Pourchaire", "J. Doohan", "J. Vips", "L. Lawson", "E. Fittipaldi", "M. Armstrong", "J. Daruvala", "D. Hauger", "J. Hughes", "R. Nissany", "A. Iwasa", "L. Sargeant", "C. Williams", "C. Novalak", "F. Vesti", "M. Sato", "A. Cordeel", "O. Caldwell", "C. Bölükbasi", "R. Verschoor"), seq(1:21))
+colnames(table_q) <- c("DRIVER", "POS_START")
+}else{
+table_q <- processando(table[[3]], tipo = "Qualifying", round = round)
+}
+data <- rbind(data, inner_join(rbind(table_f, table_s), table_q, by = "DRIVER"))
+}
+return(data)
+}
+
+manipulando_q_f2 <- function(lista){
+data <- data.frame()
+for(i in (1:length(lista))){
+page <- read_html(lista[i])
+table <- html_table(page)
+round <- page %>% html_nodes(".schedule") %>% html_text() %>% str_extract("^[A-z]{5}[[:blank:]][0-9]{1,2}")
+if(round == "Round 5"){
+table_q <- data.frame(c("F. Drugovich", "T. Pourchaire", "J. Doohan", "J. Vips", "L. Lawson", "E. Fittipaldi", "M. Armstrong", "J. Daruvala", "D. Hauger", "J. Hughes", "R. Nissany", "A. Iwasa", "L. Sargeant", "C. Williams", "C. Novalak", "F. Vesti", "M. Sato", "A. Cordeel", "O. Caldwell", "C. Bölükbasi", "R. Verschoor"), seq(1:21))
+colnames(table_q) <- c("DRIVER", "POS_START")
+}else{
+table_q <- processando(table[[3]], tipo = "Qualifying", round = round)
+}
+data <- rbind(data, table_q)
+}
+return(data)
+}
+
+l_f2_2022 <- c("https://www.fiaformula2.com/Results?raceid=1035", "https://www.fiaformula2.com/Results?raceid=1036", "https://www.fiaformula2.com/Results?raceid=1037", "https://www.fiaformula2.com/Results?raceid=1038", "https://www.fiaformula2.com/Results?raceid=1039", "https://www.fiaformula2.com/Results?raceid=1040", "https://www.fiaformula2.com/Results?raceid=1041", "https://www.fiaformula2.com/Results?raceid=1042", "https://www.fiaformula2.com/Results?raceid=1043","https://www.fiaformula2.com/Results?raceid=1044",
+"https://www.fiaformula2.com/Results?raceid=1045","https://www.fiaformula2.com/Results?raceid=1046", "https://www.fiaformula2.com/Results?raceid=1049","https://www.fiaformula2.com/Results?raceid=1048")
+
+manipulando_f2(l_f2_2022) -> data_f2_2022
+manipulando_q_f2(l_f2_2022) -> data_q_f2
+
+data_f2_2022 <- data_f2_2022 %>% mutate(POS_START = ifelse(TYPE == "Sprint Race" & POS_START < 11, 11 - POS_START, POS_START))
+
+dados <- data_f2_2022 %>% group_by(DRIVER) %>% summarise(POS_GAINED = sum(ifelse(POS_START - POS > 0, POS_START - POS, 0)), WINS = sum(ifelse(POS == 1, 1,0)), PODIUMS = sum(ifelse(POS <= 3, 1,0)), MEAN_POS = mean(POS), FINISHEDS_RACES = sum(ifelse(GAP != "DNF", 1, 0)), FASTESTLAPS = sum(BESTLAP), POINTS = sum(POINTS + BESTLAP_P))
+
+dados_driver <- data.frame(c("A. Cordeel", "A. Iwasa", "C. Bölükbasi", "C. Novalak", "C. Williams", "D. Beckmann", "D. Hauger","E. Fittipaldi", "F. Drugovich", "F. Vesti", "J. Correa", "J. Daruvala", "J. Doohan", "J. Hughes","J. Vips", "L. Ghiotto", "L. Lawson", "L. Sargeant", "L. Zendeli", "M. Armstrong", "M. Sato","O. Caldwell", "R. Boschung","R. Merhi","R. Nissany", "R. Verschoor", "T. Calderón", "T. Pourchaire", "Z. Maloney"), c(0, 0, 0,0, 0, 1, 0, 0, 2,0, 1, 2,0, 1, 2,4, 1, 0, 1, 2, 2, 0, 5, 2,3, 1, 1, 1, 0), c(19, 20, 24, 20, 21, 21, 19, 20, 21, 20, 21, 23, 19, 26, 21, 27, 20, 21,21, 20, 21, 19, 23, 30, 26, 20, 29, 17, 17))
+colnames(dados_driver) <- c("DRIVER", "EXP_AGE", "AGE")
+
+dados <- inner_join(dados, dados_driver, by = "DRIVER")
+
+dados_q <- data_q_f2 %>% group_by(DRIVER) %>% summarise(POLES = sum(ifelse(POS_START == 1, 1,0)), AVG_Q = mean(POS_START), BEST_QUALY = min(POS_START))
+
+inner_join(dados, dados_q, by = "DRIVER") -> dados
+dados <- dados %>% filter(FINISHEDS_RACES > 5) %>% mutate(POINTS = POINTS + 2*POLES)
+
+rn <- dados$DRIVER
+dados <- dados[,-1]
+rn <- as.data.frame(rn) 
+rownames(dados) <- rn[,1]
+
+dados_copy <- dados
